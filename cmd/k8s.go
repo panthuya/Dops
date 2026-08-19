@@ -246,6 +246,9 @@ var searchCmd = &cobra.Command{
 
 		addMatchRow := func(kind, ns, name, usedBy, details string) {
 			foundCount++
+			if details != "" {
+				details = lipgloss.NewStyle().Width(80).Render(details)
+			}
 			tbRows = append(tbRows, []string{
 				resTypeStyle.Render(kind),
 				nsStyle.Render(ns) + "/" + resNameStyle.Render(name),
