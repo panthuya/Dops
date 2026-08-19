@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -158,57 +157,9 @@ var httpCmd = &cobra.Command{
 	},
 }
 
-var grpcCmd = &cobra.Command{
-	Use:   "grpc [server:port] [service.Method] [optional-json-body]",
-	Short: "Make a gRPC request simply",
-	Args:  cobra.RangeArgs(1, 3),
-	Run: func(cmd *cobra.Command, args []string) {
-		_, err := exec.LookPath("grpcurl")
-		if err != nil {
-			fmt.Println(lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Render("Error: 'grpcurl' is not installed. Please install it first (e.g., brew install grpcurl)."))
-			return
-		}
-
-		grpcArgs := []string{"-plaintext"}
-		for _, h := range headers {
-			grpcArgs = append(grpcArgs, "-H", h)
-		}
-
-		server := args[0]
-		
-		if len(args) == 1 {
-			// Auto-list services if only server is provided
-			grpcArgs = append(grpcArgs, server, "list")
-		} else if len(args) == 2 {
-			// Call method without body
-			grpcArgs = append(grpcArgs, server, args[1])
-		} else if len(args) == 3 {
-			// Call method with body
-			bodyData := args[2]
-			if strings.HasPrefix(bodyData, "@") {
-				b, err := os.ReadFile(strings.TrimPrefix(bodyData, "@"))
-				if err == nil {
-					bodyData = string(b)
-				}
-			}
-			grpcArgs = append(grpcArgs, "-d", bodyData, server, args[1])
-		}
-
-		execCmd := exec.Command("grpcurl", grpcArgs...)
-		execCmd.Stdout = os.Stdout
-		execCmd.Stderr = os.Stderr
-		
-		fmt.Printf("%s\n\n", reqInfoStyle.Render(fmt.Sprintf("Running: grpcurl %s", strings.Join(grpcArgs, " "))))
-		err = execCmd.Run()
-		if err != nil {
-			fmt.Printf("\ngRPC request failed: %v\n", err)
-		}
-	},
-}
 
 func init() {
 	rootCmd.AddCommand(httpCmd)
-	rootCmd.AddCommand(grpcCmd)
 
 	// HTTP flags
 	httpCmd.Flags().StringVarP(&method, "method", "X", "GET", "HTTP Method")
@@ -216,6 +167,4 @@ func init() {
 	httpCmd.Flags().StringVarP(&data, "data", "d", "", "HTTP Body Data")
 	httpCmd.Flags().BoolVarP(&minimal, "minimal", "m", false, "Only show status code and session cookies")
 
-	// GRPC flags
-	grpcCmd.Flags().StringSliceVarP(&headers, "header", "H", []string{}, "gRPC Header")
 }

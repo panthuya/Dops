@@ -9,10 +9,12 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
@@ -22,14 +24,14 @@ var (
 	exactMatch bool
 
 	searchHeaderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FFFF")).Bold(true)
-	resTypeStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF00FF")).Bold(true).Width(15)
+	resTypeStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#4ADE80")).Bold(true).Width(15)
 	resNameStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FFFF")).Bold(true)
 	nsStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
 	secretKeyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFF00")).Bold(true)
 	secretValStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#E2E8F0"))
 	boxStyle       = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#FF00FF")).
+			BorderForeground(lipgloss.Color("#4ADE80")).
 			Padding(0, 1).
 			MarginLeft(4).
 			MarginTop(0).
@@ -216,6 +218,8 @@ var searchCmd = &cobra.Command{
 			return
 		}
 
+		config.WarningHandler = rest.NoWarnings{}
+
 		clientset, err := kubernetes.NewForConfig(config)
 		if err != nil {
 			fmt.Printf("Error creating clientset: %v\n", err)
@@ -231,6 +235,7 @@ var searchCmd = &cobra.Command{
 		}
 		
 		foundCount := 0
+		var tbRows [][]string
 
 		matches := func(name string) bool {
 			if exactMatch {
@@ -239,9 +244,14 @@ var searchCmd = &cobra.Command{
 			return strings.Contains(strings.ToLower(name), keyword)
 		}
 
-		printMatch := func(kind, ns, name string) {
+		addMatchRow := func(kind, ns, name, usedBy, details string) {
 			foundCount++
-			fmt.Printf(" ✔ %s | %s/%s\n", resTypeStyle.Render(kind), nsStyle.Render(ns), resNameStyle.Render(name))
+			tbRows = append(tbRows, []string{
+				resTypeStyle.Render(kind),
+				nsStyle.Render(ns) + "/" + resNameStyle.Render(name),
+				usedBy,
+				details,
+			})
 		}
 
 		findUsages := func(ns, name string, isSecret bool) []string {
@@ -314,10 +324,11 @@ var searchCmd = &cobra.Command{
 						}
 					}
 					if matchFound {
-						printMatch("ConfigMap", item.Namespace, item.Name)
+						usedBy := ""
 						if usages := findUsages(item.Namespace, item.Name, false); len(usages) > 0 {
-							fmt.Printf("   ↳ %s %s\n", lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFF00")).Render("Used by:"), strings.Join(usages, ", "))
+							usedBy = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFF00")).Render("Used by: ") + strings.Join(usages, ", ")
 						}
+						addMatchRow("ConfigMap", item.Namespace, item.Name, usedBy, "")
 					}
 				}
 			}
@@ -331,7 +342,7 @@ var searchCmd = &cobra.Command{
 			} else {
 				for _, item := range cjs.Items {
 					if matches(item.Name) {
-						printMatch("CronJob", item.Namespace, item.Name)
+						addMatchRow("CronJob", item.Namespace, item.Name, "", "")
 					}
 				}
 			}
@@ -345,7 +356,7 @@ var searchCmd = &cobra.Command{
 			} else {
 				for _, item := range deps.Items {
 					if matches(item.Name) {
-						printMatch("Deployment", item.Namespace, item.Name)
+						addMatchRow("Deployment", item.Namespace, item.Name, "", "")
 					}
 				}
 			}
@@ -359,7 +370,7 @@ var searchCmd = &cobra.Command{
 			} else {
 				for _, item := range sts.Items {
 					if matches(item.Name) {
-						printMatch("StatefulSet", item.Namespace, item.Name)
+						addMatchRow("StatefulSet", item.Namespace, item.Name, "", "")
 					}
 				}
 			}
@@ -373,7 +384,7 @@ var searchCmd = &cobra.Command{
 			} else {
 				for _, item := range svcs.Items {
 					if matches(item.Name) {
-						printMatch("Service", item.Namespace, item.Name)
+						addMatchRow("Service", item.Namespace, item.Name, "", "")
 					}
 				}
 			}
@@ -402,18 +413,19 @@ var searchCmd = &cobra.Command{
 					}
 
 					if matchFound {
-						printMatch("Secret", item.Namespace, item.Name)
+						usedBy := ""
+						if usages := findUsages(item.Namespace, item.Name, true); len(usages) > 0 {
+							usedBy = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFF00")).Render("Used by: ") + strings.Join(usages, ", ")
+						}
 						var lines []string
 						for k, v := range item.Data {
 							lines = append(lines, fmt.Sprintf("%s: %s", secretKeyStyle.Render(k), secretValStyle.Render(string(v))))
 						}
+						details := ""
 						if len(lines) > 0 {
-							content := lipgloss.JoinVertical(lipgloss.Left, lines...)
-							fmt.Println(boxStyle.Render(content))
+							details = lipgloss.JoinVertical(lipgloss.Left, lines...)
 						}
-						if usages := findUsages(item.Namespace, item.Name, true); len(usages) > 0 {
-							fmt.Printf("   ↳ %s %s\n", lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFF00")).Render("Used by:"), strings.Join(usages, ", "))
-						}
+						addMatchRow("Secret", item.Namespace, item.Name, usedBy, details)
 					}
 				}
 			}
@@ -422,6 +434,13 @@ var searchCmd = &cobra.Command{
 		if foundCount == 0 {
 			fmt.Println(nsStyle.Render("   No resources found."))
 		} else {
+			t := table.New().
+				Border(lipgloss.RoundedBorder()).
+				BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("#4ADE80"))).
+				Headers("TYPE", "NAMESPACE/NAME", "USED BY", "DETAILS").
+				Rows(tbRows...)
+			
+			fmt.Println("\n" + t.Render())
 			fmt.Printf("\n   %s %d resources.\n\n", searchHeaderStyle.Render("Total Found:"), foundCount)
 		}
 	},
