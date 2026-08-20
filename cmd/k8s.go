@@ -475,10 +475,28 @@ var searchCmd = &cobra.Command{
 						continue
 					}
 
+					// If the secret ONLY contains .jks files, skip it completely
+					isOnlyJKS := true
+					hasData := false
+					for k := range item.Data {
+						hasData = true
+						if !strings.HasSuffix(k, ".jks") {
+							isOnlyJKS = false
+							break
+						}
+					}
+					if hasData && isOnlyJKS {
+						continue
+					}
+
 					matchFound := matches(item.Name)
 					if !matchFound {
 						for k, v := range item.Data {
-							if matches(k) || matches(string(v)) {
+							if matches(k) {
+								matchFound = true
+								break
+							}
+							if !strings.HasSuffix(k, ".jks") && matches(string(v)) {
 								matchFound = true
 								break
 							}
@@ -492,7 +510,9 @@ var searchCmd = &cobra.Command{
 						}
 						var lines []string
 						for k, v := range item.Data {
-							lines = append(lines, fmt.Sprintf("%s: %s", secretKeyStyle.Render(k), secretValStyle.Render(string(v))))
+							if !strings.HasSuffix(k, ".jks") {
+								lines = append(lines, fmt.Sprintf("%s: %s", secretKeyStyle.Render(k), secretValStyle.Render(string(v))))
+							}
 						}
 						details := ""
 						if len(lines) > 0 {
