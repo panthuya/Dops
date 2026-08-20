@@ -46,74 +46,118 @@ var k8sCmd = &cobra.Command{
 
 var validResources = []string{"configmaps", "cronjobs", "deployments", "statefulsets", "services", "secrets", "all"}
 
+var k8sHierarchy = map[string][]string{
+	"root": {"apiVersion", "kind", "metadata", "spec", "data", "stringData", "type", "clusters", "contexts", "users", "preferences", "current-context", "secrets", "imagePullSecrets", "rules", "subjects", "roleRef", "webhooks"},
+	"metadata": {"name", "namespace", "labels", "annotations", "finalizers", "ownerReferences"},
+	"spec": {"replicas", "selector", "template", "containers", "initContainers", "volumes", "serviceAccountName", "ports", "type", "rules", "tls", "clusterIP", "sessionAffinity", "strategy", "minReadySeconds", "nodeSelector", "affinity", "tolerations"},
+	"selector": {"matchLabels", "matchExpressions"},
+	"template": {"metadata", "spec"},
+	"containers": {"name", "image", "ports", "env", "envFrom", "resources", "volumeMounts", "livenessProbe", "readinessProbe", "securityContext", "command", "args", "imagePullPolicy", "workingDir"},
+	"initContainers": {"name", "image", "ports", "env", "envFrom", "resources", "volumeMounts", "securityContext", "command", "args", "imagePullPolicy", "workingDir"},
+	"ports": {"name", "containerPort", "nodePort", "targetPort", "port", "protocol"},
+	"env": {"name", "value", "valueFrom"},
+	"volumeMounts": {"name", "mountPath", "subPath", "readOnly"},
+	"volumes": {"name", "configMap", "secret", "emptyDir", "persistentVolumeClaim", "hostPath", "projected"},
+	"rules": {"host", "http"},
+	"http": {"paths"},
+	"paths": {"path", "pathType", "backend"},
+	"backend": {"service"},
+	"service": {"name", "port"},
+	"tls": {"hosts", "secretName"},
+	"clusters": {"cluster", "name"},
+	"contexts": {"context", "name"},
+	"users": {"user", "name"},
+	"cluster": {"server", "certificate-authority-data", "insecure-skip-tls-verify"},
+	"context": {"cluster", "user", "namespace"},
+	"user": {"token", "client-certificate-data", "client-key-data", "username", "password", "exec", "auth-provider"},
+}
+
 func sanitizeK8sYAML(data string) string {
 	lines := strings.Split(data, "\n")
 	var out []string
-	
-	// A very aggressive heuristic K8s YAML indentation fixer
-	inTemplate := false
-	
+
+	stack := []string{"root"}
+	indentStack := []int{0}
+
 	for _, line := range lines {
 		trim := strings.TrimSpace(line)
 		if trim == "" || strings.HasPrefix(trim, "#") {
 			out = append(out, line)
 			continue
 		}
-		
+
 		if trim == "---" {
-			inTemplate = false
+			stack = []string{"root"}
+			indentStack = []int{0}
 			out = append(out, trim)
 			continue
 		}
 
-		// Keep track if we are deeply nested
-		if strings.HasPrefix(trim, "template:") {
-			inTemplate = true
+		isListItem := strings.HasPrefix(trim, "- ")
+		keyPart := trim
+		if isListItem {
+			keyPart = strings.TrimPrefix(keyPart, "- ")
+		}
+		
+		colonIdx := strings.Index(keyPart, ":")
+		key := keyPart
+		if colonIdx != -1 {
+			key = strings.TrimSpace(keyPart[:colonIdx])
 		}
 
-		// Force top-level keys to 0 spaces if they clearly belong at the root
-		if !inTemplate {
-			if strings.HasPrefix(trim, "apiVersion:") || 
-			   strings.HasPrefix(trim, "kind:") || 
-			   strings.HasPrefix(trim, "metadata:") || 
-			   strings.HasPrefix(trim, "spec:") || 
-			   strings.HasPrefix(trim, "data:") || 
-			   strings.HasPrefix(trim, "type:") {
-				out = append(out, trim) // 0 spaces
-				continue
-			}
-		}
-
-		// Force known secondary keys to 2 spaces if they are heavily out of alignment
-		if !inTemplate {
-			if strings.HasPrefix(trim, "name:") || 
-			   strings.HasPrefix(trim, "namespace:") || 
-			   strings.HasPrefix(trim, "selector:") || 
-			   strings.HasPrefix(trim, "ports:") || 
-			   strings.HasPrefix(trim, "replicas:") || 
-			   strings.HasPrefix(trim, "containers:") || 
-			   strings.HasPrefix(trim, "labels:") {
-				// If it has 0 spaces or > 4 spaces, force it to 2 spaces
-				spaces := len(line) - len(strings.TrimLeft(line, " "))
-				if spaces != 2 {
-					out = append(out, "  "+trim)
-					continue
+		bestIndent := -1
+		for i := len(stack) - 1; i >= 0; i-- {
+			parent := stack[i]
+			allowedChildren := k8sHierarchy[parent]
+			found := false
+			for _, child := range allowedChildren {
+				if child == key {
+					found = true
+					break
 				}
 			}
-		}
-
-		// Array item alignment heuristic: if a list item is completely unindented, push it in
-		if strings.HasPrefix(trim, "- ") {
-			spaces := len(line) - len(strings.TrimLeft(line, " "))
-			if spaces == 0 {
-				out = append(out, "  "+trim) // push to 2 spaces
-				continue
+			if found {
+				bestIndent = indentStack[i]
+				if parent != "root" {
+					bestIndent += 2
+				}
+                
+				stack = stack[:i+1]
+				indentStack = indentStack[:i+1]
+				break
 			}
 		}
 
-		out = append(out, line)
+		if bestIndent == -1 {
+            if len(indentStack) > 0 {
+			    bestIndent = indentStack[len(indentStack)-1] + 2
+            } else {
+                bestIndent = 0
+            }
+		}
+
+		isBlockOpener := strings.HasSuffix(trim, ":")
+
+		leadingSpaces := bestIndent
+		if isListItem {
+			leadingSpaces -= 2
+			if leadingSpaces < 0 {
+				leadingSpaces = 0
+			}
+		}
+
+		outLine := strings.Repeat(" ", leadingSpaces) + trim
+		out = append(out, outLine)
+
+		if isBlockOpener {
+			stack = append(stack, key)
+			if isListItem {
+				indentStack = append(indentStack, leadingSpaces+2)
+			} else {
+				indentStack = append(indentStack, leadingSpaces)
+			}
+		}
 	}
-	
 	return strings.Join(out, "\n")
 }
 
