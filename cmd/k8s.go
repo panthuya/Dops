@@ -47,23 +47,49 @@ var k8sCmd = &cobra.Command{
 var validResources = []string{"configmaps", "cronjobs", "deployments", "statefulsets", "services", "secrets", "all"}
 
 var k8sHierarchy = map[string][]string{
-	"root": {"apiVersion", "kind", "metadata", "spec", "data", "stringData", "type", "clusters", "contexts", "users", "preferences", "current-context", "secrets", "imagePullSecrets", "rules", "subjects", "roleRef", "webhooks"},
-	"metadata": {"name", "namespace", "labels", "annotations", "finalizers", "ownerReferences"},
-	"spec": {"replicas", "selector", "template", "containers", "initContainers", "volumes", "serviceAccountName", "ports", "type", "rules", "tls", "clusterIP", "sessionAffinity", "strategy", "minReadySeconds", "nodeSelector", "affinity", "tolerations"},
+	"root": {"apiVersion", "kind", "metadata", "spec", "data", "stringData", "type", "clusters", "contexts", "users", "preferences", "current-context", "secrets", "imagePullSecrets", "rules", "subjects", "roleRef", "webhooks", "subsets", "items"},
+	"metadata": {"name", "namespace", "labels", "annotations", "finalizers", "ownerReferences", "creationTimestamp", "resourceVersion", "uid", "generation"},
+	"spec": {
+		"replicas", "selector", "template", "containers", "initContainers", "ephemeralContainers", "volumes", 
+		"serviceAccountName", "serviceAccount", "ports", "type", "rules", "tls", "clusterIP", "clusterIPs", 
+		"sessionAffinity", "strategy", "updateStrategy", "minReadySeconds", "nodeSelector", "affinity", 
+		"tolerations", "imagePullSecrets", "restartPolicy", "terminationGracePeriodSeconds", "dnsPolicy", 
+		"securityContext", "schedulerName", "hostNetwork", "hostPID", "hostIPC", "accessModes", "resources", 
+		"storageClassName", "volumeName", "volumeMode", "capacity", "hostPath", "persistentVolumeReclaimPolicy", 
+		"claimRef", "podSelector", "policyTypes", "ingress", "egress", "jobTemplate", "schedule", 
+		"concurrencyPolicy", "successfulJobsHistoryLimit", "failedJobsHistoryLimit", "podManagementPolicy", 
+		"serviceName", "scaleTargetRef", "minReplicas", "maxReplicas", "metrics", "behavior", "defaultBackend",
+		"suspend", "completions", "parallelism", "backoffLimit", "activeDeadlineSeconds",
+	},
 	"selector": {"matchLabels", "matchExpressions"},
 	"template": {"metadata", "spec"},
-	"containers": {"name", "image", "ports", "env", "envFrom", "resources", "volumeMounts", "livenessProbe", "readinessProbe", "securityContext", "command", "args", "imagePullPolicy", "workingDir"},
-	"initContainers": {"name", "image", "ports", "env", "envFrom", "resources", "volumeMounts", "securityContext", "command", "args", "imagePullPolicy", "workingDir"},
-	"ports": {"name", "containerPort", "nodePort", "targetPort", "port", "protocol"},
+	"jobTemplate": {"metadata", "spec"},
+	"containers": {"name", "image", "ports", "env", "envFrom", "resources", "volumeMounts", "volumeDevices", "livenessProbe", "readinessProbe", "startupProbe", "securityContext", "command", "args", "imagePullPolicy", "workingDir", "lifecycle", "stdin", "tty"},
+	"initContainers": {"name", "image", "ports", "env", "envFrom", "resources", "volumeMounts", "volumeDevices", "livenessProbe", "readinessProbe", "startupProbe", "securityContext", "command", "args", "imagePullPolicy", "workingDir", "lifecycle", "stdin", "tty"},
+	"ephemeralContainers": {"name", "image", "ports", "env", "envFrom", "resources", "volumeMounts", "volumeDevices", "livenessProbe", "readinessProbe", "startupProbe", "securityContext", "command", "args", "imagePullPolicy", "workingDir", "lifecycle", "stdin", "tty", "targetContainerName"},
+	"ports": {"name", "containerPort", "nodePort", "targetPort", "port", "protocol", "hostPort", "hostIP"},
 	"env": {"name", "value", "valueFrom"},
-	"volumeMounts": {"name", "mountPath", "subPath", "readOnly"},
-	"volumes": {"name", "configMap", "secret", "emptyDir", "persistentVolumeClaim", "hostPath", "projected"},
-	"rules": {"host", "http"},
+	"envFrom": {"configMapRef", "secretRef", "prefix"},
+	"valueFrom": {"fieldRef", "resourceFieldRef", "configMapKeyRef", "secretKeyRef"},
+	"resources": {"requests", "limits", "claims"},
+	"volumeMounts": {"name", "mountPath", "subPath", "readOnly", "mountPropagation", "subPathExpr"},
+	"volumes": {"name", "configMap", "secret", "emptyDir", "persistentVolumeClaim", "hostPath", "projected", "downwardAPI", "nfs", "iscsi", "glusterfs", "pvc", "csi", "awsElasticBlockStore", "azureDisk", "azureFile", "gcePersistentDisk", "fc", "rbd", "cephfs", "flocker", "quobyte", "vsphereVolume", "photonPersistentDisk", "portworxVolume", "scaleIO", "storageos"},
+	"rules": {"host", "http", "apiGroups", "resources", "verbs", "resourceNames", "nonResourceURLs"},
 	"http": {"paths"},
 	"paths": {"path", "pathType", "backend"},
-	"backend": {"service"},
+	"backend": {"service", "resource"},
 	"service": {"name", "port"},
 	"tls": {"hosts", "secretName"},
+	"subjects": {"kind", "name", "namespace", "apiGroup"},
+	"roleRef": {"kind", "name", "apiGroup"},
+	"ingress": {"from", "ports"},
+	"egress": {"to", "ports"},
+	"from": {"ipBlock", "namespaceSelector", "podSelector"},
+	"to": {"ipBlock", "namespaceSelector", "podSelector"},
+	"subsets": {"addresses", "notReadyAddresses", "ports"},
+	"addresses": {"ip", "hostname", "nodeName", "targetRef"},
+	"notReadyAddresses": {"ip", "hostname", "nodeName", "targetRef"},
+	"items": {"apiVersion", "kind", "metadata", "spec", "data", "stringData", "type"},
 	"clusters": {"cluster", "name"},
 	"contexts": {"context", "name"},
 	"users": {"user", "name"},
@@ -449,10 +475,28 @@ var searchCmd = &cobra.Command{
 						continue
 					}
 
+					// If the secret ONLY contains .jks files, skip it completely
+					isOnlyJKS := true
+					hasData := false
+					for k := range item.Data {
+						hasData = true
+						if !strings.HasSuffix(k, ".jks") {
+							isOnlyJKS = false
+							break
+						}
+					}
+					if hasData && isOnlyJKS {
+						continue
+					}
+
 					matchFound := matches(item.Name)
 					if !matchFound {
 						for k, v := range item.Data {
-							if matches(k) || matches(string(v)) {
+							if matches(k) {
+								matchFound = true
+								break
+							}
+							if !strings.HasSuffix(k, ".jks") && matches(string(v)) {
 								matchFound = true
 								break
 							}
@@ -466,7 +510,9 @@ var searchCmd = &cobra.Command{
 						}
 						var lines []string
 						for k, v := range item.Data {
-							lines = append(lines, fmt.Sprintf("%s: %s", secretKeyStyle.Render(k), secretValStyle.Render(string(v))))
+							if !strings.HasSuffix(k, ".jks") {
+								lines = append(lines, fmt.Sprintf("%s: %s", secretKeyStyle.Render(k), secretValStyle.Render(string(v))))
+							}
 						}
 						details := ""
 						if len(lines) > 0 {
