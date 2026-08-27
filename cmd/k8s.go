@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -307,6 +308,21 @@ var searchCmd = &cobra.Command{
 		foundCount := 0
 		var tbRows [][]string
 
+		termWidth, _, err := term.GetSize(int(os.Stdout.Fd()))
+		if err != nil || termWidth <= 0 {
+			termWidth = 120
+		}
+
+		typeWidth := 15
+		available := termWidth - typeWidth - 13
+		if available < 80 {
+			available = 80
+		}
+
+		nameWidth := int(float64(available) * 0.25)
+		usedByWidth := int(float64(available) * 0.30)
+		detailsWidth := available - nameWidth - usedByWidth
+
 		matches := func(name string) bool {
 			if exactMatch {
 				return strings.Contains(name, keyword)
@@ -317,11 +333,18 @@ var searchCmd = &cobra.Command{
 		addMatchRow := func(kind, ns, name, usedBy, details string) {
 			foundCount++
 			if details != "" {
-				details = lipgloss.NewStyle().Width(80).Render(details)
+				details = lipgloss.NewStyle().Width(detailsWidth).Render(details)
 			}
+			if usedBy != "" {
+				usedBy = lipgloss.NewStyle().Width(usedByWidth).Render(usedBy)
+			}
+			
+			nsName := nsStyle.Render(ns) + "/" + resNameStyle.Render(name)
+			nsName = lipgloss.NewStyle().Width(nameWidth).Render(nsName)
+
 			tbRows = append(tbRows, []string{
 				resTypeStyle.Render(kind),
-				nsStyle.Render(ns) + "/" + resNameStyle.Render(name),
+				nsName,
 				usedBy,
 				details,
 			})
