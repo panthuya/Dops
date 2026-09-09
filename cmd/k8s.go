@@ -106,8 +106,46 @@ func sanitizeK8sYAML(data string) string {
 	stack := []string{"root"}
 	indentStack := []int{0}
 
+	inMultiline := false
+	multilineOriginalParentIndent := -1
+	multilineNewParentIndent := -1
+
 	for _, line := range lines {
 		trim := strings.TrimSpace(line)
+
+		if inMultiline {
+			if trim == "" {
+				out = append(out, line)
+				continue
+			}
+
+			currentIndent := 0
+			for _, c := range line {
+				if c == ' ' {
+					currentIndent++
+				} else if c == '\t' {
+					currentIndent += 4
+				} else {
+					break
+				}
+			}
+
+			if currentIndent <= multilineOriginalParentIndent {
+				inMultiline = false
+				multilineOriginalParentIndent = -1
+				multilineNewParentIndent = -1
+				// fall through to process this line as normal
+			} else {
+				shift := multilineNewParentIndent - multilineOriginalParentIndent
+				newIndent := currentIndent + shift
+				if newIndent < 0 {
+					newIndent = 0
+				}
+				out = append(out, strings.Repeat(" ", newIndent)+trim)
+				continue
+			}
+		}
+
 		if trim == "" || strings.HasPrefix(trim, "#") {
 			out = append(out, line)
 			continue
@@ -118,6 +156,17 @@ func sanitizeK8sYAML(data string) string {
 			indentStack = []int{0}
 			out = append(out, trim)
 			continue
+		}
+
+		originalIndent := 0
+		for _, c := range line {
+			if c == ' ' {
+				originalIndent++
+			} else if c == '\t' {
+				originalIndent += 4
+			} else {
+				break
+			}
 		}
 
 		isListItem := strings.HasPrefix(trim, "- ")
@@ -182,6 +231,13 @@ func sanitizeK8sYAML(data string) string {
 				indentStack = append(indentStack, leadingSpaces+2)
 			} else {
 				indentStack = append(indentStack, leadingSpaces)
+			}
+		} else {
+			if strings.HasSuffix(trim, "|") || strings.HasSuffix(trim, "|-") || strings.HasSuffix(trim, "|+") ||
+				strings.HasSuffix(trim, ">") || strings.HasSuffix(trim, ">-") || strings.HasSuffix(trim, ">+") {
+				inMultiline = true
+				multilineOriginalParentIndent = originalIndent
+				multilineNewParentIndent = leadingSpaces
 			}
 		}
 	}
