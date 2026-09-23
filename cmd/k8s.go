@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -13,7 +14,10 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -45,7 +49,7 @@ var k8sCmd = &cobra.Command{
 	Short: "Kubernetes search operations",
 }
 
-var validResources = []string{"configmaps", "cronjobs", "deployments", "statefulsets", "services", "secrets", "all"}
+var validResources = []string{"configmaps", "cronjobs", "deployments", "statefulsets", "services", "secrets", "virtualservices", "httproutes", "gateways", "all"}
 
 var k8sHierarchy = map[string][]string{
 	"root": {"apiVersion", "kind", "metadata", "spec", "data", "stringData", "type", "clusters", "contexts", "users", "preferences", "current-context", "secrets", "imagePullSecrets", "rules", "subjects", "roleRef", "webhooks", "subsets", "items"},
@@ -353,6 +357,12 @@ var searchCmd = &cobra.Command{
 			return
 		}
 
+		dynClient, err := dynamic.NewForConfig(config)
+		if err != nil {
+			fmt.Printf("Error creating dynamic client: %v\n", err)
+			return
+		}
+
 		ctx := context.TODO()
 		fmt.Printf("\n%s\n", searchHeaderStyle.Render(fmt.Sprintf("🔎 Searching for %q in %s", keyword, resType)))
 		if namespace != "" {
@@ -493,7 +503,14 @@ var searchCmd = &cobra.Command{
 				fmt.Printf(lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Render(fmt.Sprintf("   [!] Error listing CronJobs: %v\n", err)))
 			} else {
 				for _, item := range cjs.Items {
-					if matches(item.Name) {
+					matchFound := matches(item.Name)
+					if !matchFound {
+						b, _ := json.Marshal(item)
+						if matches(string(b)) {
+							matchFound = true
+						}
+					}
+					if matchFound {
 						addMatchRow("CronJob", item.Namespace, item.Name, "", "")
 					}
 				}
@@ -507,7 +524,14 @@ var searchCmd = &cobra.Command{
 				fmt.Printf(lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Render(fmt.Sprintf("   [!] Error listing Deployments: %v\n", err)))
 			} else {
 				for _, item := range deps.Items {
-					if matches(item.Name) {
+					matchFound := matches(item.Name)
+					if !matchFound {
+						b, _ := json.Marshal(item)
+						if matches(string(b)) {
+							matchFound = true
+						}
+					}
+					if matchFound {
 						addMatchRow("Deployment", item.Namespace, item.Name, "", "")
 					}
 				}
@@ -521,7 +545,14 @@ var searchCmd = &cobra.Command{
 				fmt.Printf(lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Render(fmt.Sprintf("   [!] Error listing StatefulSets: %v\n", err)))
 			} else {
 				for _, item := range sts.Items {
-					if matches(item.Name) {
+					matchFound := matches(item.Name)
+					if !matchFound {
+						b, _ := json.Marshal(item)
+						if matches(string(b)) {
+							matchFound = true
+						}
+					}
+					if matchFound {
 						addMatchRow("StatefulSet", item.Namespace, item.Name, "", "")
 					}
 				}
@@ -535,7 +566,14 @@ var searchCmd = &cobra.Command{
 				fmt.Printf(lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Render(fmt.Sprintf("   [!] Error listing Services: %v\n", err)))
 			} else {
 				for _, item := range svcs.Items {
-					if matches(item.Name) {
+					matchFound := matches(item.Name)
+					if !matchFound {
+						b, _ := json.Marshal(item)
+						if matches(string(b)) {
+							matchFound = true
+						}
+					}
+					if matchFound {
 						addMatchRow("Service", item.Namespace, item.Name, "", "")
 					}
 				}
@@ -601,6 +639,41 @@ var searchCmd = &cobra.Command{
 					}
 				}
 			}
+		}
+
+		searchDynamic := func(gvr schema.GroupVersionResource, kind string) {
+			list, err := dynClient.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{})
+			if err != nil {
+				if !errors.IsNotFound(err) && !strings.Contains(err.Error(), "the server could not find the requested resource") {
+					fmt.Printf(lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Render(fmt.Sprintf("   [!] Error listing %s: %v\n", kind, err)))
+				}
+				return
+			}
+			for _, item := range list.Items {
+				matchFound := matches(item.GetName())
+				if !matchFound {
+					b, _ := json.Marshal(item.Object)
+					if matches(string(b)) {
+						matchFound = true
+					}
+				}
+				if matchFound {
+					addMatchRow(kind, item.GetNamespace(), item.GetName(), "", "")
+				}
+			}
+		}
+
+		if checkType("virtualservice") || checkType("vs") {
+			searchDynamic(schema.GroupVersionResource{Group: "networking.istio.io", Version: "v1beta1", Resource: "virtualservices"}, "VirtualService")
+			searchDynamic(schema.GroupVersionResource{Group: "networking.istio.io", Version: "v1alpha3", Resource: "virtualservices"}, "VirtualService")
+		}
+
+		if checkType("httproute") {
+			searchDynamic(schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "httproutes"}, "HTTPRoute")
+		}
+
+		if checkType("gateway") || checkType("gw") {
+			searchDynamic(schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "gateways"}, "Gateway")
 		}
 
 		if foundCount == 0 {
