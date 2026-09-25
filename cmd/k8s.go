@@ -49,7 +49,7 @@ var k8sCmd = &cobra.Command{
 	Short: "Kubernetes search operations",
 }
 
-var validResources = []string{"configmaps", "cronjobs", "deployments", "statefulsets", "services", "secrets", "virtualservices", "httproutes", "gateways", "all"}
+var validResources = []string{"configmaps", "cronjobs", "deployments", "statefulsets", "services", "secrets", "virtualservices", "httproutes", "gateways", "apigateways", "all"}
 
 var k8sHierarchy = map[string][]string{
 	"root": {"apiVersion", "kind", "metadata", "spec", "data", "stringData", "type", "clusters", "contexts", "users", "preferences", "current-context", "secrets", "imagePullSecrets", "rules", "subjects", "roleRef", "webhooks", "subsets", "items"},
@@ -301,7 +301,7 @@ var fmtCmd = &cobra.Command{
 var searchCmd = &cobra.Command{
 	Use:   "search [resource_type] [keyword]",
 	Short: "Search k8s resources (e.g. configmaps, secrets) for a keyword",
-	Long:  "Resource type can be: configmaps, cronjobs, deployments, statefulsets, services, secrets, or all. Example: dops k8s search secrets my-password",
+	Long:  "Resource type can be: configmaps, cronjobs, deployments, statefulsets, services, secrets, virtualservices, httproutes, gateways, apigateways, or all. Example: dops k8s search secrets my-password",
 	Args:  cobra.RangeArgs(0, 2),
 	ValidArgs: validResources,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -672,7 +672,7 @@ var searchCmd = &cobra.Command{
 			searchDynamic(schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "httproutes"}, "HTTPRoute")
 		}
 
-		if checkType("gateway") || checkType("gw") {
+		if checkType("gateway") || checkType("gw") || checkType("apigateway") {
 			searchDynamic(schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "gateways"}, "Gateway")
 		}
 
