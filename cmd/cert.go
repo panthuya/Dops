@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/pavlo-v-chernykh/keystore-go/v4"
@@ -121,6 +122,15 @@ func analyzeCerts(name string, certs []*x509.Certificate) {
 		fmt.Printf(" ❌ %s: %s\n", lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Render(name), "NOT a full chain (Only a single certificate found)")
 		fmt.Printf("    Subject: %s\n", certs[0].Subject.CommonName)
 		fmt.Printf("    Issuer: %s\n", certs[0].Issuer.CommonName)
+		
+		daysLeft := int(time.Until(certs[0].NotAfter).Hours() / 24)
+		expireStr := fmt.Sprintf("%s (%d days left)", certs[0].NotAfter.Format("2006-01-02 15:04:05 Z07:00"), daysLeft)
+		if daysLeft < 0 {
+			expireStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Render(expireStr + " - EXPIRED")
+		} else if daysLeft < 30 {
+			expireStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFF00")).Render(expireStr)
+		}
+		fmt.Printf("    Expires: %s\n", expireStr)
 		return
 	}
 
@@ -140,12 +150,28 @@ func analyzeCerts(name string, certs []*x509.Certificate) {
 		for i, cert := range certs {
 			fmt.Printf("    [%d] Subject: %s\n", i, cert.Subject.CommonName)
 			fmt.Printf("        Issuer: %s\n", cert.Issuer.CommonName)
+			daysLeft := int(time.Until(cert.NotAfter).Hours() / 24)
+			expireStr := fmt.Sprintf("%s (%d days left)", cert.NotAfter.Format("2006-01-02 15:04:05 Z07:00"), daysLeft)
+			if daysLeft < 0 {
+				expireStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Render(expireStr + " - EXPIRED")
+			} else if daysLeft < 30 {
+				expireStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFF00")).Render(expireStr)
+			}
+			fmt.Printf("        Expires: %s\n", expireStr)
 		}
 	} else {
 		fmt.Printf(" ❌ %s: %s\n", lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Render(name), fmt.Sprintf("NOT a full chain (Multiple certificates found (%d), but they do not form a sequential chain)", len(certs)))
 		for i, cert := range certs {
 			fmt.Printf("    [%d] Subject: %s\n", i, cert.Subject.CommonName)
 			fmt.Printf("        Issuer: %s\n", cert.Issuer.CommonName)
+			daysLeft := int(time.Until(cert.NotAfter).Hours() / 24)
+			expireStr := fmt.Sprintf("%s (%d days left)", cert.NotAfter.Format("2006-01-02 15:04:05 Z07:00"), daysLeft)
+			if daysLeft < 0 {
+				expireStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Render(expireStr + " - EXPIRED")
+			} else if daysLeft < 30 {
+				expireStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFF00")).Render(expireStr)
+			}
+			fmt.Printf("        Expires: %s\n", expireStr)
 		}
 	}
 }
